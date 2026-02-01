@@ -8,12 +8,23 @@ and uploads results to Supabase Storage.
 """
 
 import pika
+import ssl
 import json
 import requests
 import os
 import time
 from datetime import datetime
-from supabase import create_client
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Try to import Supabase (optional)
+try:
+    from supabase import create_client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
 
 # Configuration from environment variables
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
@@ -24,7 +35,7 @@ QUEUE_NAME = os.getenv("QUEUE_NAME", "comfyui_jobs")
 
 # Initialize Supabase client (optional - for production)
 supabase = None
-if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+if SUPABASE_AVAILABLE and SUPABASE_URL and SUPABASE_SERVICE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     print("[✓] Supabase client initialized")
 else:
@@ -197,7 +208,15 @@ def main():
     
     # Connect to RabbitMQ
     print(f"[*] Connecting to RabbitMQ...")
-    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+    
+    # Configure SSL for CloudAMQP (amqps://)
+    url_params = pika.URLParameters(RABBITMQ_URL)
+    if RABBITMQ_URL.startswith("amqps://"):
+        # CloudAMQP requires SSL
+        ssl_context = ssl.create_default_context()
+        url_params.ssl_options = pika.SSLOptions(ssl_context)
+    
+    connection = pika.BlockingConnection(url_params)
     channel = connection.channel()
     
     # Declare queue (creates if doesn't exist)

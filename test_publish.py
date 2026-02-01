@@ -5,6 +5,7 @@ Use this to test the worker without modifying FastAPI.
 """
 
 import pika
+import ssl
 import json
 import uuid
 import os
@@ -14,6 +15,15 @@ load_dotenv()
 
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "comfyui_jobs")
+
+
+def get_connection():
+    """Get RabbitMQ connection with SSL support for CloudAMQP."""
+    url_params = pika.URLParameters(RABBITMQ_URL)
+    if RABBITMQ_URL.startswith("amqps://"):
+        ssl_context = ssl.create_default_context()
+        url_params.ssl_options = pika.SSLOptions(ssl_context)
+    return pika.BlockingConnection(url_params)
 
 # Simple test workflow - generates a basic image
 # Modify ckpt_name to match a model you have installed
@@ -82,7 +92,7 @@ def publish_job(workflow, job_id=None):
     """Publish a job to the RabbitMQ queue."""
     job_id = job_id or str(uuid.uuid4())
     
-    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+    connection = get_connection()
     channel = connection.channel()
     channel.queue_declare(queue=QUEUE_NAME, durable=True)
     
@@ -106,7 +116,7 @@ def publish_job(workflow, job_id=None):
 
 def check_queue():
     """Check how many messages are in the queue."""
-    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+    connection = get_connection()
     channel = connection.channel()
     queue = channel.queue_declare(queue=QUEUE_NAME, durable=True, passive=True)
     count = queue.method.message_count

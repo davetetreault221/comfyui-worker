@@ -71,10 +71,35 @@ def wait_for_completion(prompt_id, timeout=300):
     raise Exception(f"Timeout waiting for ComfyUI after {timeout} seconds")
 
 
-def upload_to_supabase(job_id, images):
+def cleanup_user_images(user_id):
+    """Delete existing images for a user before uploading new ones."""
+    if not supabase or not user_id:
+        return
+    
+    try:
+        # List all files in the user's folder
+        result = supabase.storage.from_("generations").list(user_id)
+        if result:
+            # Build list of file paths to delete
+            files_to_delete = [f"{user_id}/{f['name']}" for f in result]
+            if files_to_delete:
+                supabase.storage.from_("generations").remove(files_to_delete)
+                print(f"    [✓] Cleaned up {len(files_to_delete)} old image(s)")
+    except Exception as e:
+        print(f"    [!] Cleanup error (non-fatal): {e}")
+
+
+def upload_to_supabase(job_id, images, user_id=None):
     """Download images from ComfyUI and upload to Supabase Storage."""
     if not supabase:
         return None
+    
+    # Determine storage folder: use user_id if provided, otherwise fall back to job_id
+    storage_folder = user_id if user_id else job_id
+    
+    # Clean up existing images for this user before uploading new ones
+    if user_id:
+        cleanup_user_images(user_id)
     
     image_urls = []
     for i, img in enumerate(images):
@@ -93,12 +118,12 @@ def upload_to_supabase(job_id, images):
                 print(f"    [!] Failed to download image: {img['filename']}")
                 continue
             
-            # Upload to Supabase Storage
-            storage_path = f"{job_id}/{i}.png"
+            # Upload to Supabase Storage using user_id as folder (overwrites per user)
+            storage_path = f"{storage_folder}/{i}.png"
             supabase.storage.from_("generations").upload(
                 storage_path,
                 img_response.content,
-                {"content-type": "image/png"}
+                {"content-type": "image/png", "upsert": "true"}
             )
             
             # Get public URL
@@ -135,9 +160,11 @@ def process_job(ch, method, properties, body):
     message = json.loads(body)
     job_id = message.get("job_id", "unknown")
     workflow = message.get("workflow", {})
+    user_id = message.get("user_id")  # Used for storage path (one folder per user)
     
     print(f"\n{'='*60}")
     print(f"[*] Processing job: {job_id}")
+    print(f"    User: {user_id or 'anonymous'}")
     print(f"    Time: {datetime.now().isoformat()}")
     
     try:
@@ -170,8 +197,8 @@ def process_job(ch, method, properties, body):
         if images:
             print(f"    Generated {len(images)} image(s)")
             
-            # Upload to Supabase
-            image_urls = upload_to_supabase(job_id, images)
+            # Upload to Supabase (uses user_id as folder for per-user overwrite)
+            image_urls = upload_to_supabase(job_id, images, user_id=user_id)
             
             # Update job as complete
             update_job_status(job_id, "complete", image_urls=image_urls)

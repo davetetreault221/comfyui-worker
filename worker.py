@@ -42,7 +42,7 @@ else:
     print("[!] Supabase not configured - results will only be logged")
 
 
-def wait_for_comfyui(timeout=60):
+def wait_for_comfyui(timeout=600):
     """Wait for ComfyUI to be ready."""
     print(f"[*] Waiting for ComfyUI at {COMFYUI_URL}...")
     for i in range(timeout):
